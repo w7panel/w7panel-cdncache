@@ -13,7 +13,7 @@ jobs:
       packages: write
     env:
       ZPK_HOST: zpk.w7.cc
-      ZPK_ARTIFACT: w7-cdn-cache
+      ZPK_ARTIFACT: w7-cdncache
       IMAGE_PUSH_REGISTRY: ${{ vars.IMAGE_PUSH_REGISTRY || 'ghcr.io' }}
       HELM_PACKAGE_IMAGE_REGISTRY: ${{ vars.HELM_PACKAGE_IMAGE_REGISTRY || 'ghcr.registry.cdn.w7.cc' }}
     steps:
