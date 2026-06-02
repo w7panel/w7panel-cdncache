@@ -1,0 +1,28 @@
+.DS_Store
+node_modules
+/dist
+/_cd
+/thirdparty_cd
+thirdparty_cd.zip
+/kangkang_cd
+kangkang_cd.zip
+
+
+# local env files
+.env.local
+.env.*.local
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
