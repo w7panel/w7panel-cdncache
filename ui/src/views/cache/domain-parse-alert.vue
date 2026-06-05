@@ -6,9 +6,9 @@
             type="info"
             show-icon
             :closable="false"
-            class="domain-parse-alert"
+            class="alert-style"
         >
-            <span style="color:var(--el-color-primary)">
+            <span class="alert-style-default">
                 <span>记录类型：</span>
                 <span>{{ domainParse.type }}；</span>
                 <span>记录值：</span>
@@ -64,5 +64,37 @@ export default {
 .domain-parse-alert.el-alert{
     background-color: var(--el-color-primary-light-9);
     color: var(--el-color-primary);
+}
+
+.alert-style{
+    background-color: rgb(232, 243, 255)!important;
+    padding: 16px!important;
+    align-items: start!important;
+}
+.alert-style.el-alert .el-alert__icon{
+    font-size: 16px!important;
+    margin-right: 8px!important;
+    height: 22px!important;
+    width: 22px!important;
+    color: rgb(22,93,255)!important;
+}
+.alert-style .el-alert__title{
+    margin-bottom: 4px;
+    font-weight: 500;
+    font-size: 16px;
+    line-height: 1.5;
+    color: rgb(29,33,41);
+}
+.alert-style .el-alert__content{padding-left:0!important;}
+.alert-style-ul{
+    color: rgb(78,89,105)!important;
+    margin:0;
+    line-height: 22px;
+    padding-inline-start: 18px;
+    font-size:14px!important;
+}
+.alert-style-default{
+    color: rgb(78,89,105)!important;
+    font-size:14px!important;
 }
 </style>
