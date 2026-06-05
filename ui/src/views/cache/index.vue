@@ -4,7 +4,7 @@
             
             <div class="com-back df ai-c">
                 <span class="backbtn df ai-c" @click="$router.go(-1)">
-                    <el-icon class="backicon" color="#0052D9" :size="20"><Back /></el-icon>
+                    <el-icon class="backicon" color="rgb(var(--primary-6))" :size="20"><Back /></el-icon>
                     <span style="color: #86909c; font-size: 16px">站点配置</span>
                     <span style="color: #c9cdd4; padding: 0 5px; font-weight: 900; font-size: 16px">/</span>
                     <span style="font-size: 16px">详情</span>
@@ -409,8 +409,13 @@
 
 <script>
 import myAxios from "../../utils/index";
+import { IconPlus, IconQuestionCircleFill } from "@arco-design/web-vue/es/icon";
 export default {
     name: "k8s-catch",
+    components: {
+        IconPlus,
+        IconQuestionCircleFill,
+    },
     data() {
         return {
             tab: "2",

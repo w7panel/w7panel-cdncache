@@ -63,7 +63,7 @@ a.txt-line,
 .c-yellow{color:#FFD7A1;}
 .c-green{color:#00A870;}
 a.c-blue,
-.c-blue{color:#0052D9;}
+.c-blue{color:#165DFF;}
 .c-brown{color:#C37937;}
 a,.c-orange,
 .c-orange{color:#ED7B2F;}
@@ -147,7 +147,16 @@ a,.c-orange,
 .bg-padding.pb-24{padding-bottom:24px;}
 .bg-padding.pb-20{padding-bottom:20px;}
 
-:root {--el-color-primary: #0052D9;--el-font-weight-primary: normal}
+:root {
+  --el-color-primary: #165DFF;
+  --el-color-primary-dark-2: #0E42D2;
+  --el-color-primary-light-3: #6AA1FF;
+  --el-color-primary-light-5: #94BFFF;
+  --el-color-primary-light-7: #BEDAFF;
+  --el-color-primary-light-8: #D7E8FF;
+  --el-color-primary-light-9: #E8F3FF;
+  --el-font-weight-primary: normal;
+}
 
 .el-button.el-button--primary:hover,
 .el-button.el-button--primary:focus{background-color: var(--el-color-primary);  border-color:var(--el-color-primary);}
