@@ -11,9 +11,14 @@ import (
 )
 
 var internalApiMap = make(map[string]gin.HandlerFunc)
+var publicApiMap = make(map[string]gin.HandlerFunc)
 
 func RegisterInternalApiRoutes(path string, handler gin.HandlerFunc) {
 	internalApiMap[path] = handler
+}
+
+func RegisterPublicApiRoutes(path string, handler gin.HandlerFunc) {
+	publicApiMap[path] = handler
 }
 
 type Api struct {
@@ -43,6 +48,13 @@ func (c Api) checkToken(ctx *gin.Context) error {
 }
 
 func (c Api) Process(ctx *gin.Context) {
+	if handler := publicApiMap[ctx.Request.URL.Path]; handler != nil {
+		ctx.Set("api_handler", true)
+		handler(ctx)
+		ctx.Abort()
+		return
+	}
+
 	handler, exist := internalApiMap[ctx.Request.URL.Path]
 	if !exist {
 		for path, _handler := range internalApiMap {

@@ -37,6 +37,7 @@ func (p Provider) Register(httpServer *httpServer.Server) {
 }
 
 func (p Provider) RegisterHttpRoutes(server *httpServer.Server) {
+	middleware.RegisterPublicApiRoutes("/api/setting/common-list", controller.Setting{}.CommonList)
 	middleware.RegisterInternalApiRoutes("/api/setting/set", controller.Setting{}.Set)
 	middleware.RegisterInternalApiRoutes("/api/setting/get", controller.Setting{}.Get)
 	middleware.RegisterInternalApiRoutes("/api/setting/list", controller.Setting{}.List)
