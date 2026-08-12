@@ -16,6 +16,8 @@ var settingFileSuffix = "-setting.json"
 
 const DefaultPathPrefix = "/"
 
+const globalSettingGroup = "global"
+
 type StorageMinio struct {
 	AccessKey string `json:"access_key"`
 	SecretKey string `json:"secret_key"`
@@ -48,6 +50,10 @@ type Setting struct {
 
 func (l Setting) SetStorageCacheSetting(host string, cacheSetting StorageCacheSetting) error {
 	cacheSettingMap := l.GetStorageCacheSettingMap(host)
+	if host != globalSettingGroup && storageConfigMode(cacheSetting.Extra) == "global" {
+		// 全局模式只保存继承标记，读取时动态解析全局存储配置。
+		cacheSetting.StorageCacheMinio = &StorageMinio{}
+	}
 
 	if cacheSetting.PathCacheRules != nil {
 		sort.Slice(cacheSetting.PathCacheRules, func(i, j int) bool {
@@ -135,9 +141,30 @@ func (l Setting) GetStorageCacheSettingMap(host string) map[string]StorageCacheS
 func (l Setting) GetStorageCacheSettingByHost(host string) StorageCacheSetting {
 	cacheSettingMap := l.GetStorageCacheSettingMap(host)
 	if cacheSetting, ok := cacheSettingMap[DefaultPathPrefix]; ok {
+		if host != globalSettingGroup && storageConfigMode(cacheSetting.Extra) == "global" {
+			globalSetting := l.GetStorageCacheSettingByHost(globalSettingGroup)
+			if globalSetting.StorageCacheMinio != nil {
+				globalStorage := *globalSetting.StorageCacheMinio
+				cacheSetting.StorageCacheMinio = &globalStorage
+				if globalStorage.Endpoint != "" {
+					if err := (S3Client{}).ResetMinioClient(host, globalStorage); err != nil {
+						slog.Error("GetStorageCacheSettingByHost: ResetMinioClient() error", "err", err)
+					}
+				}
+			}
+		}
 		return cacheSetting
 	}
 	return StorageCacheSetting{}
+}
+
+func storageConfigMode(extra map[string]interface{}) string {
+	storageConfig, ok := extra["storage_config"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	mode, _ := storageConfig["mode"].(string)
+	return mode
 }
 
 func (l Setting) DelStorageCacheSetting(host string) {

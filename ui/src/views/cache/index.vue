@@ -12,33 +12,40 @@
             </div>
         </div>
         <a-tabs v-model:active-key="tab" class="file-cache-tabs">
+            <template #extra>
+                <a-button v-if="!inWujie" type="primary" @click="submit"
+                    >保存配置</a-button
+                >
+            </template>
             <a-tab-pane key="2" title="缓存配置"></a-tab-pane>
-            <a-tab-pane key="1" title="缓存镜像仓库"></a-tab-pane>
+            <a-tab-pane key="1" title="存储配置"></a-tab-pane>
         </a-tabs>
         <div v-if="tab == '1'">
-            <div class="repository-toolbar">
-                <el-radio-group v-model="cacheRepository.mode">
+            <div class="storage-toolbar">
+                <el-radio-group v-model="storageMode">
                     <el-radio-button label="global">全局配置</el-radio-button>
                     <el-radio-button label="custom">自定义</el-radio-button>
                 </el-radio-group>
+                <el-button @click="$router.push('/cache/storage')">
+                    编辑全局配置
+                </el-button>
             </div>
 
             <el-alert
-                v-if="!globalRepositoryLoading && cacheRepository.mode === 'global' && !globalRepository.repository_url"
-                title="尚未配置全局缓存仓库，请先完成全局配置"
+                v-if="!globalStorageLoading && storageMode === 'global' && !globalStorage.endpoint"
+                title="尚未配置全局存储，请先完成全局配置"
                 type="warning"
                 show-icon
                 :closable="false"
                 class="mb-20"
             />
 
-            <el-skeleton v-if="globalRepositoryLoading" :rows="2" animated />
-            <CacheRepositoryForm
+            <el-skeleton v-if="globalStorageLoading" :rows="5" animated />
+            <StorageConfigForm
                 v-else
-                :model-value="activeCacheRepository"
-                :repository-disabled="cacheRepository.mode === 'global'"
-                :inherited="cacheRepository.mode === 'global'"
-                @update:model-value="updateCacheRepository"
+                :model-value="activeStorageConfig"
+                :disabled="storageMode === 'global'"
+                @update:model-value="updateStorageConfig"
             />
         </div>
         <div v-if="tab == '2'">
@@ -348,7 +355,7 @@
 
             <div class="b mt-40">源站信息配置</div>
             <div class="mt-10 padding-20" style="background:var(--color-neutral-1)">
-                <el-form-item label="源站地址" label-width="80px" style="margin-bottom: 0">
+                <el-form-item label="源站地址" label-width="100px">
                     <el-input v-model="endpoint.server_url_after" style="width:600px;">
                         <template #prepend>
                             <el-select
@@ -362,27 +369,41 @@
                         </template>
                     </el-input>
                 </el-form-item>
+                <el-form-item label="源站HOST" label-width="100px" style="margin-bottom:0;">
+                    <el-switch v-model="endpoint.host_switch" />
+
+                    <el-input v-if="endpoint.host_switch" v-model="endpoint.endpoint_host" class="ml-20" placeholder="请输入" style="width:540px;" />
+                </el-form-item>
             </div>
         </div>
 
-        <div class="site-form-actions">
-            <a-button type="primary" @click="submit">保存配置</a-button>
-            <a-button v-if="inWujie" class="ml-20" @click="close">取消</a-button>
+        <div v-if="inWujie" class="df ai-c jc-e" style="padding: 20px">
+            <a-button @click="close">取消</a-button>
+            <a-button @click="submit" type="primary" class="ml-20">保存</a-button>
         </div>
     </div>
 </template>
 
 <script>
 import myAxios from "../../utils/index";
-import { getGlobalCacheRepository, responseData } from "../../api/config";
-import CacheRepositoryForm from "../../components/cache-repository-form.vue";
+import { getGlobalStorageConfig, responseData } from "../../api/config";
+import StorageConfigForm from "../../components/storage-config-form.vue";
 import { IconPlus, IconQuestionCircleFill } from "@arco-design/web-vue/es/icon";
+
+const createStorageConfig = () => ({
+    access_key: "",
+    secret_key: "",
+    bucket: "",
+    endpoint: "",
+    region: "",
+});
+
 export default {
     name: "k8s-catch",
     components: {
         IconPlus,
         IconQuestionCircleFill,
-        CacheRepositoryForm,
+        StorageConfigForm,
     },
     data() {
         return {
@@ -393,29 +414,20 @@ export default {
             storage_source: {},
             extra: {},
             inWujie: false,
-            globalRepositoryLoading: true,
-            globalRepository: {
-                repository_url: "",
-                storage_path: "/",
-                username: "",
-                password: "",
-            },
-            cacheRepository: {
-                mode: "global",
-                repository_url: "",
-                storage_path: "/",
-                username: "",
-                password: "",
-            },
+            globalStorageLoading: true,
+            globalStorage: createStorageConfig(),
+            storageMode: "global",
             endpoint: {
                 server_url_pre: "http://",
                 server_url_after: "",
+                endpoint_host: "",
+                host_switch: false,
             },
         };
     },
     created() {
         this.inWujie = window?.__POWERED_BY_WUJIE__;
-        this.loadGlobalRepository();
+        this.loadGlobalStorage();
 
         myAxios
             .post("/api/setting/get", {
@@ -430,19 +442,16 @@ export default {
                     this.storage_source = data.storage_source || {
                         endpoint: "",
                     };
-                    this.extra = data.extra || {};
-                    const storedCacheRepository = this.extra.cache_repository || {};
-                    this.cacheRepository = {
-                        mode: ["global", "custom"].includes(storedCacheRepository.mode)
-                            ? storedCacheRepository.mode
-                            : "global",
-                        repository_url: storedCacheRepository.repository_url || "",
-                        storage_path: storedCacheRepository.storage_path || "/",
-                        username: storedCacheRepository.username || "",
-                        password: storedCacheRepository.password || "",
-                    };
-                    this.normalizeRepositoryPath();
+                    const extra = { ...(data.extra || {}) };
+                    delete extra.cache_repository;
+                    this.extra = extra;
+                    const storedStorageConfig = this.extra.storage_config || {};
+                    this.storageMode = ["global", "custom"].includes(storedStorageConfig.mode)
+                        ? storedStorageConfig.mode
+                        : (data.minio?.endpoint ? "custom" : "global");
                     this.endpoint = {
+                        host_switch: !!this.storage_source?.endpoint_host,
+                        endpoint_host: this.storage_source?.endpoint_host || "",
                         server_url_pre: this.storage_source?.endpoint?.match?.(/^(https?:\/\/)/)?.[0] || "http://",
                         server_url_after: this.storage_source?.endpoint?.replace?.(/^https?:\/\//,'') || "",
                     };
@@ -470,74 +479,39 @@ export default {
                 //             this.$route.query.path_match_type || "prefix",
                 //     };
                 // }
-            })
-            .catch(() => {
-                // 详情页保留默认表单，错误信息由 axios 拦截器统一处理。
             });
     },
     computed: {
-        activeCacheRepository() {
-            const repository = this.cacheRepository.mode === "global"
-                ? this.globalRepository
-                : this.cacheRepository;
-            return {
-                repository_url: repository.repository_url || "",
-                storage_path: this.cacheRepository.storage_path,
-                username: repository.username || "",
-                password: repository.password || "",
-            };
+        activeStorageConfig() {
+            return this.storageMode === "global"
+                ? this.globalStorage
+                : this.newForm;
         },
     },
     methods: {
-        async loadGlobalRepository() {
-            this.globalRepositoryLoading = true;
+        async loadGlobalStorage() {
+            this.globalStorageLoading = true;
             try {
-                const response = await getGlobalCacheRepository(true);
-                const repository = responseData(response);
-                this.globalRepository = {
-                    repository_url: repository.repository_url || "",
-                    storage_path: repository.storage_path || "/",
-                    username: repository.username || "",
-                    password: repository.password || "",
+                const response = await getGlobalStorageConfig(true);
+                this.globalStorage = {
+                    ...createStorageConfig(),
+                    ...responseData(response),
                 };
             } catch (e) {
-                this.globalRepository = {
-                    repository_url: "",
-                    storage_path: "/",
-                    username: "",
-                    password: "",
-                };
+                this.globalStorage = createStorageConfig();
             } finally {
-                this.globalRepositoryLoading = false;
+                this.globalStorageLoading = false;
             }
         },
-        normalizeRepositoryPath() {
-            const value = this.cacheRepository.storage_path?.trim() || "/";
-            this.cacheRepository.storage_path = value.startsWith("/") ? value : `/${value}`;
-        },
-        updateCacheRepository(value) {
-            this.cacheRepository = {
-                ...this.cacheRepository,
-                repository_url: this.cacheRepository.mode === "custom"
-                    ? value.repository_url
-                    : this.cacheRepository.repository_url,
-                storage_path: value.storage_path,
-                username: this.cacheRepository.mode === "custom"
-                    ? value.username
-                    : this.cacheRepository.username,
-                password: this.cacheRepository.mode === "custom"
-                    ? value.password
-                    : this.cacheRepository.password,
-            };
-        },
-        validateRepository() {
-            this.normalizeRepositoryPath();
-            if (this.cacheRepository.mode === "global" && !this.globalRepository.repository_url) {
-                this.$message.warning("请先配置全局缓存仓库");
-                return false;
+        updateStorageConfig(value) {
+            if (this.storageMode === "custom") {
+                this.newForm = value;
             }
-            if (this.cacheRepository.mode === "custom" && !this.cacheRepository.repository_url) {
-                this.$message.warning("请输入镜像仓库地址");
+        },
+        validateStorageConfig() {
+            const storage = this.activeStorageConfig;
+            if (this.storageMode === "global" && !storage.endpoint) {
+                this.$message.warning("请先配置全局存储");
                 return false;
             }
             return true;
@@ -550,7 +524,7 @@ export default {
             return v.map((i) => i.replace(/^\/+/, "")).filter((i) => i);
         },
         submit() {
-            if (!this.validateRepository()) return;
+            if (!this.validateStorageConfig()) return;
             // 将cache_ttl，weight字段转化为数字
             this.path_cache_rules.forEach((item) => {
                 item.cache_ttl = parseInt(item.cache_ttl);
@@ -565,25 +539,16 @@ export default {
                     storage_source: {
                         ...this.storage_source,
                         endpoint: this.endpoint.server_url_pre + this.endpoint.server_url_after,
+                        endpoint_host: this.endpoint.host_switch ? this.endpoint.endpoint_host : "",
                     },
-                    minio: this.newForm,
+                    minio: this.activeStorageConfig,
                     path_cache_rules: this.path_cache_rules,
                     path_key_cache_rules: this.path_key_cache_rules,
                     extra: {
                         ...this.extra,
                         ingress_name: this.$route.query.ingress_name || "",
-                        cache_repository: {
-                            mode: this.cacheRepository.mode,
-                            repository_url: this.cacheRepository.mode === "custom"
-                                ? this.cacheRepository.repository_url
-                                : "",
-                            storage_path: this.cacheRepository.storage_path,
-                            username: this.cacheRepository.mode === "custom"
-                                ? this.cacheRepository.username
-                                : "",
-                            password: this.cacheRepository.mode === "custom"
-                                ? this.cacheRepository.password
-                                : "",
+                        storage_config: {
+                            mode: this.storageMode,
                         },
                     },
                 })
@@ -601,16 +566,11 @@ export default {
 </script>
 
 <style>
-.repository-toolbar {
+.storage-toolbar {
     display: flex;
     margin-bottom: 20px;
     align-items: center;
-}
-
-.site-form-actions {
-    display: flex;
-    padding: 20px 0;
-    align-items: center;
+    justify-content: space-between;
 }
 
 .file-cache-tabs .arco-tabs-nav-type-line .arco-tabs-tab {

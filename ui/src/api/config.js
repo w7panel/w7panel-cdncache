@@ -16,44 +16,29 @@ const getGlobalSetting = (quiet = false) =>
         quiet ? quietConfig : undefined,
     );
 
-const getGlobalExtra = async (key, quiet = false) => {
+export const getGlobalStorageConfig = async (quiet = false) => {
     const response = await getGlobalSetting(quiet);
     const setting = responseData(response);
     return {
         data: {
-            data: setting?.extra?.[key] || {},
+            data: setting?.minio || {},
         },
     };
 };
 
-const saveGlobalExtra = async (key, data) => {
+export const saveGlobalStorageConfig = async (data) => {
     const response = await getGlobalSetting(true);
     const setting = responseData(response);
+    const extra = { ...(setting.extra || {}) };
+    delete extra.cache_repository;
+    delete extra.page_setting;
 
     return myAxios.post("/api/setting/set", {
         group: GLOBAL_GROUP,
         storage_source: setting.storage_source || {},
-        minio: setting.minio || {},
+        minio: data,
         path_cache_rules: setting.path_cache_rules || [],
         path_key_cache_rules: setting.path_key_cache_rules || [],
-        extra: {
-            ...(setting.extra || {}),
-            [key]: data,
-        },
+        extra,
     });
 };
-
-export const getPublicSiteList = (quiet = false) =>
-    myAxios.post("/api/setting/common-list", {}, quiet ? quietConfig : undefined);
-
-export const getGlobalCacheRepository = (quiet = false) =>
-    getGlobalExtra("cache_repository", quiet);
-
-export const saveGlobalCacheRepository = (data) =>
-    saveGlobalExtra("cache_repository", data);
-
-export const getPageSetting = (quiet = false) =>
-    getGlobalExtra("page_setting", quiet);
-
-export const savePageSetting = (data) =>
-    saveGlobalExtra("page_setting", data);

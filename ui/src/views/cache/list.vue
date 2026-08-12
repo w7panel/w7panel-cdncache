@@ -3,15 +3,6 @@
         <div class="bg-white bg-padding pb-20">
             <div class="mb-20 df jc-b ai-c list-toolbar">
                 <el-button type="primary" icon="Plus" @click="addSite">添加站点</el-button>
-                <div class="df ai-c toolbar-actions">
-                    <el-button @click="$router.push('/cache/repository')">
-                        缓存仓库配置
-                    </el-button>
-                    <el-button @click="$router.push('/cache/page-setting')">
-                        页面设置
-                    </el-button>
-                    <el-button @click="openPublicHome">访问公开首页</el-button>
-                </div>
             </div>
             <el-table :data="data" class="table-header">
                 <el-table-column prop="host" label="域名" />
@@ -102,10 +93,6 @@ export default {
         this.getList();
     },
     methods: {
-        openPublicHome() {
-            const route = this.$router.resolve({ name: "public-home" });
-            window.open(route.href, "_blank", "noopener");
-        },
         toHttpsConfig(row){
             let data = { domainName: row.ingressName };
             window.$wujie?.bus?.$emit?.("domainCert",data);
@@ -153,6 +140,7 @@ export default {
                 return;
             }
 
+            const paneltoken = window.$wujie?.props?.paneltoken;
             const uniqueDomains = Array.from(new Map(domains.map(item => [item.url_after, item])).values());
 
             try {
@@ -216,6 +204,7 @@ export default {
                 }
                 await myAxios.post('/k8s-proxy/apis/networking.k8s.io/v1/namespaces/default/ingresses', data, {
                     baseURL: '',
+                    // customToken: paneltoken,
                 });
 
                 await myAxios.post('/api/setting/set', {
@@ -234,12 +223,8 @@ export default {
                     path_key_cache_rules: [],
                     extra: {
                         ingress_name: ingressName,
-                        cache_repository: {
+                        storage_config: {
                             mode: "global",
-                            repository_url: "",
-                            storage_path: "/",
-                            username: "",
-                            password: "",
                         },
                     },
                 });
@@ -247,9 +232,7 @@ export default {
                 this.addSiteDialog.show = false;
                 this.getList();
                 this.$message.success('创建成功');
-            } catch (e) {
-                // 请求错误由 axios 拦截器统一提示。
-            }
+            } catch (e) {}
 
         },
         openClearCache(row) {
@@ -289,8 +272,6 @@ export default {
                             return arr[1];
                         });
                 }
-            }).catch(() => {
-                this.data = [];
             });
         },
         deleteRecord(group, pathPrefix,ingressName) {
@@ -309,10 +290,6 @@ export default {
 </script>
 
 <style>
-.list-toolbar .toolbar-actions .el-button + .el-button {
-    margin-left: 10px;
-}
-
 .delete-popconfirm.el-popper{padding:10px; width:180px;}
 .delete-popconfirm .el-popconfirm__action {
     display: flex;

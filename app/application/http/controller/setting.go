@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
-	"net/url"
 	"strings"
 
 	"gitee.com/we7coreteam/w7-cdn-cache/app/application/logic"
@@ -14,33 +12,11 @@ type Setting struct {
 	controller.Abstract
 }
 
-type commonStorageSource struct {
-	Endpoint string `json:"endpoint"`
-}
-
-type commonPageSetting struct {
-	Markdown      string `json:"markdown"`
-	ICPNumber     string `json:"icp_number"`
-	ICPLink       string `json:"icp_link"`
-	PoliceNumber  string `json:"police_number"`
-	PoliceLink    string `json:"police_link"`
-	Copyright     string `json:"copyright"`
-	CopyrightLink string `json:"copyright_link"`
-}
-
-type commonExtra struct {
-	PageSetting *commonPageSetting `json:"page_setting,omitempty"`
-}
-
-type commonStorageCacheSetting struct {
-	StorageSource *commonStorageSource `json:"storage_source,omitempty"`
-	Extra         *commonExtra         `json:"extra,omitempty"`
-}
-
-func mergeStorageCacheList() (map[string]logic.StorageCacheSetting, error) {
+func (c Setting) List(ctx *gin.Context) {
 	list, err := logic.Setting{}.StorageCacheList()
 	if err != nil {
-		return nil, err
+		c.JsonResponseWithServerError(ctx, err)
+		return
 	}
 
 	mergeList := make(map[string]logic.StorageCacheSetting)
@@ -56,87 +32,8 @@ func mergeStorageCacheList() (map[string]logic.StorageCacheSetting, error) {
 		}
 		mergeList[tmpKey] = val
 	}
-	return mergeList, nil
-}
-
-func (c Setting) List(ctx *gin.Context) {
-	mergeList, err := mergeStorageCacheList()
-	if err != nil {
-		c.JsonResponseWithServerError(ctx, err)
-		return
-	}
 
 	c.JsonResponseWithoutError(ctx, mergeList)
-}
-
-func (c Setting) CommonList(ctx *gin.Context) {
-	list, err := mergeStorageCacheList()
-	if err != nil {
-		c.JsonResponseWithServerError(ctx, err)
-		return
-	}
-
-	c.JsonResponseWithoutError(ctx, buildCommonStorageCacheList(list))
-}
-
-func buildCommonStorageCacheList(list map[string]logic.StorageCacheSetting) map[string]commonStorageCacheSetting {
-	// 公开接口使用字段白名单，避免对象存储密钥、仓库凭据、缓存规则及
-	// 后续新增的内部字段被意外暴露。
-	commonList := make(map[string]commonStorageCacheSetting)
-	for group, setting := range list {
-		if group == "global" {
-			commonList[group] = commonStorageCacheSetting{
-				Extra: &commonExtra{
-					PageSetting: commonPageSettingFromExtra(setting.Extra),
-				},
-			}
-			continue
-		}
-
-		commonSetting := commonStorageCacheSetting{}
-		if setting.StorageSource != nil {
-			commonSetting.StorageSource = &commonStorageSource{
-				Endpoint: sanitizeCommonEndpoint(setting.StorageSource.Endpoint),
-			}
-		}
-		commonList[group] = commonSetting
-	}
-	return commonList
-}
-
-func commonPageSettingFromExtra(extra map[string]interface{}) *commonPageSetting {
-	value, exists := extra["page_setting"]
-	if !exists {
-		return nil
-	}
-
-	content, err := json.Marshal(value)
-	if err != nil {
-		return nil
-	}
-	pageSetting := commonPageSetting{}
-	if err = json.Unmarshal(content, &pageSetting); err != nil {
-		return nil
-	}
-	return &pageSetting
-}
-
-func sanitizeCommonEndpoint(value string) string {
-	endpoints := strings.Split(value, ",")
-	sanitized := make([]string, 0, len(endpoints))
-	for _, endpoint := range endpoints {
-		parsed, err := url.Parse(strings.TrimSpace(endpoint))
-		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-			continue
-		}
-
-		parsed.User = nil
-		parsed.RawQuery = ""
-		parsed.ForceQuery = false
-		parsed.Fragment = ""
-		sanitized = append(sanitized, parsed.String())
-	}
-	return strings.Join(sanitized, ",")
 }
 
 func (c Setting) Set(ctx *gin.Context) {
