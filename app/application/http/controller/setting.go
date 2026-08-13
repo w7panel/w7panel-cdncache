@@ -12,6 +12,8 @@ type Setting struct {
 	controller.Abstract
 }
 
+const globalSettingGroup = "global"
+
 func (c Setting) List(ctx *gin.Context) {
 	list, err := logic.Setting{}.StorageCacheList()
 	if err != nil {
@@ -21,7 +23,7 @@ func (c Setting) List(ctx *gin.Context) {
 
 	mergeList := make(map[string]logic.StorageCacheSetting)
 	for key, val := range list {
-		if val.Parent != "" {
+		if key == globalSettingGroup || val.Parent != "" {
 			continue
 		}
 		tmpKey := key

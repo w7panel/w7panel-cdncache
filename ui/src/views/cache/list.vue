@@ -258,20 +258,18 @@ export default {
         getList() {
             myAxios.post("/api/setting/list").then((res) => {
                 let data = res.data.data;
-                if (data) {
-                    this.data = Object.entries(data)
-                        .filter(([group]) => group !== "global")
-                        .map((arr) => {
-                            arr[1].host = arr[0];
-                            let str = Object.entries(arr[1].storage_source || {})
-                                .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-                                .join("&");
-                            let ingressName = arr[1]?.extra?.ingress_name || "";
-                            arr[1].ingressName = ingressName;
-                            arr[1].detailUrl = `/cache/${arr[0]}?ingress_name=${ingressName}&${str}`;
-                            return arr[1];
-                        });
-                }
+                this.data = Object.entries(data || {})
+                    .filter(([group]) => group !== "global")
+                    .map((arr) => {
+                        arr[1].host = arr[0];
+                        let str = Object.entries(arr[1].storage_source || {})
+                            .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+                            .join("&");
+                        let ingressName = arr[1]?.extra?.ingress_name || "";
+                        arr[1].ingressName = ingressName;
+                        arr[1].detailUrl = `/cache/${arr[0]}?ingress_name=${ingressName}&${str}`;
+                        return arr[1];
+                    });
             });
         },
         deleteRecord(group, pathPrefix,ingressName) {
