@@ -26,9 +26,6 @@
                     <el-radio-button label="global">全局配置</el-radio-button>
                     <el-radio-button label="custom">自定义</el-radio-button>
                 </el-radio-group>
-                <el-button @click="$router.push('/cache/storage')">
-                    编辑全局配置
-                </el-button>
             </div>
 
             <el-alert
@@ -487,7 +484,7 @@ export default {
             if (this.storageMode === "global") {
                 return {
                     ...this.globalStorage,
-                    bucket: this.newForm.bucket,
+                    bucket: this.newForm.bucket || this.globalStorage.bucket || "",
                 };
             }
             return this.newForm;
