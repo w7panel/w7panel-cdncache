@@ -24,7 +24,7 @@
             <a-form-item label="bucket">
                 <a-input
                     :model-value="modelValue.bucket"
-                    :disabled="disabled"
+                    :disabled="disabled && !allowBucketEdit"
                     :spellcheck="false"
                     placeholder="请输入"
                     @update:model-value="updateField('bucket', $event)"
@@ -70,6 +70,10 @@ export default {
             }),
         },
         disabled: {
+            type: Boolean,
+            default: false,
+        },
+        allowBucketEdit: {
             type: Boolean,
             default: false,
         },

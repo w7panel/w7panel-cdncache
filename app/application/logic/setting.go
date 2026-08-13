@@ -51,8 +51,12 @@ type Setting struct {
 func (l Setting) SetStorageCacheSetting(host string, cacheSetting StorageCacheSetting) error {
 	cacheSettingMap := l.GetStorageCacheSettingMap(host)
 	if host != globalSettingGroup && storageConfigMode(cacheSetting.Extra) == "global" {
-		// 全局模式只保存继承标记，读取时动态解析全局存储配置。
-		cacheSetting.StorageCacheMinio = &StorageMinio{}
+		// 全局模式继承连接配置，但允许站点使用独立的 bucket。
+		bucket := ""
+		if cacheSetting.StorageCacheMinio != nil {
+			bucket = cacheSetting.StorageCacheMinio.Bucket
+		}
+		cacheSetting.StorageCacheMinio = &StorageMinio{Bucket: bucket}
 	}
 
 	if cacheSetting.PathCacheRules != nil {
@@ -144,7 +148,10 @@ func (l Setting) GetStorageCacheSettingByHost(host string) StorageCacheSetting {
 		if host != globalSettingGroup && storageConfigMode(cacheSetting.Extra) == "global" {
 			globalSetting := l.GetStorageCacheSettingByHost(globalSettingGroup)
 			if globalSetting.StorageCacheMinio != nil {
-				globalStorage := *globalSetting.StorageCacheMinio
+				globalStorage := resolveGlobalStorage(
+					*globalSetting.StorageCacheMinio,
+					cacheSetting.StorageCacheMinio,
+				)
 				cacheSetting.StorageCacheMinio = &globalStorage
 				if globalStorage.Endpoint != "" {
 					if err := (S3Client{}).ResetMinioClient(host, globalStorage); err != nil {
@@ -156,6 +163,13 @@ func (l Setting) GetStorageCacheSettingByHost(host string) StorageCacheSetting {
 		return cacheSetting
 	}
 	return StorageCacheSetting{}
+}
+
+func resolveGlobalStorage(globalStorage StorageMinio, siteStorage *StorageMinio) StorageMinio {
+	if siteStorage != nil && siteStorage.Bucket != "" {
+		globalStorage.Bucket = siteStorage.Bucket
+	}
+	return globalStorage
 }
 
 func storageConfigMode(extra map[string]interface{}) string {

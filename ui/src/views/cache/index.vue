@@ -45,6 +45,7 @@
                 v-else
                 :model-value="activeStorageConfig"
                 :disabled="storageMode === 'global'"
+                :allow-bucket-edit="storageMode === 'global'"
                 @update:model-value="updateStorageConfig"
             />
         </div>
@@ -483,9 +484,13 @@ export default {
     },
     computed: {
         activeStorageConfig() {
-            return this.storageMode === "global"
-                ? this.globalStorage
-                : this.newForm;
+            if (this.storageMode === "global") {
+                return {
+                    ...this.globalStorage,
+                    bucket: this.newForm.bucket,
+                };
+            }
+            return this.newForm;
         },
     },
     methods: {
@@ -506,6 +511,11 @@ export default {
         updateStorageConfig(value) {
             if (this.storageMode === "custom") {
                 this.newForm = value;
+            } else {
+                this.newForm = {
+                    ...this.newForm,
+                    bucket: value.bucket,
+                };
             }
         },
         validateStorageConfig() {
