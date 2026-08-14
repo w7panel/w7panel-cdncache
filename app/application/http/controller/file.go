@@ -178,24 +178,8 @@ func (c File) Download(ctx *gin.Context) {
 		return
 	}
 
-	if enableCache && !existsCache {
-		go logic.Transfer{}.Push(logic.TransferInfo{
-			Host:          host,
-			MinioPath:     cacheSavePath,
-			RemoteUrl:     remoteUrl,
-			CacheSetting:  setting,
-			SourceHeaders: sourceHeaders,
-		})
-	}
-
 	for key, val := range downloadHeader {
-		if enableStream && key == "Content-Length" {
-			continue
-		}
 		ctx.Header(key, val[0])
-	}
-	if enableStream {
-		ctx.Header("Transfer-Encoding", "chunked")
 	}
 
 	if cacheTtl > 0 {
@@ -203,6 +187,32 @@ func (c File) Download(ctx *gin.Context) {
 	} else if cacheTtl == 0 {
 		ctx.Header("Cache-Control", "public, max-age=315360000, immutable")
 	}
+	if ctx.Request.Method == http.MethodHead {
+		ctx.Header("Transfer-Encoding", "")
+		ctx.Header("Content-Length", strconv.FormatInt(resourcesSize, 10))
+		ctx.Status(http.StatusOK)
+		if backend != nil {
+			backendReqSuccess = true
+		}
+		return
+	}
+	if enableStream {
+		ctx.Header("Content-Length", "")
+		ctx.Header("Transfer-Encoding", "chunked")
+	}
+
+	if enableCache && !existsCache {
+		go logic.Transfer{}.Push(logic.TransferInfo{
+			Host:          host,
+			RemoteUrl:     remoteUrl,
+			MinioPath:     cacheSavePath,
+			ResourceSize:  resourcesSize,
+			ContentType:   downloadHeader.Get("Content-Type"),
+			CacheSetting:  setting,
+			SourceHeaders: sourceHeaders,
+		})
+	}
+
 	rangeHeader := ctx.GetHeader("Range")
 	offset, end := int64(0), resourcesSize-1
 	if rangeHeader != "" {
@@ -216,7 +226,8 @@ func (c File) Download(ctx *gin.Context) {
 			}
 			ctx.Status(http.StatusPartialContent)
 			ctx.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", offset, end, resourcesSize))
-			ctx.Header("Content-Length", "")
+			ctx.Header("Transfer-Encoding", "")
+			ctx.Header("Content-Length", strconv.FormatInt(end-offset+1, 10))
 		}
 	} else {
 		ctx.Status(http.StatusOK)

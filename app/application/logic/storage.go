@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"gitee.com/we7coreteam/w7-cdn-cache/common/helper"
-	"github.com/minio/minio-go/v7"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,6 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gitee.com/we7coreteam/w7-cdn-cache/common/helper"
+	"github.com/minio/minio-go/v7"
 )
 
 const (
@@ -102,8 +103,8 @@ func (l Storage) GetObjectInfoByHttp(ctx context.Context, remoteUrl string, head
 	if err != nil {
 		return nil, fmt.Errorf("HEAD请求失败: %w", err)
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		_ = resp.Body.Close()
 		return nil, fmt.Errorf("服务器返回状态码: %d", resp.StatusCode)
 	}
 

@@ -32,6 +32,8 @@ type TransferInfo struct {
 	Host          string
 	RemoteUrl     string
 	MinioPath     string
+	ResourceSize  int64
+	ContentType   string
 	CacheSetting  StorageCacheSetting
 	SourceHeaders http.Header
 }
@@ -55,11 +57,6 @@ func (l Transfer) transfer(transferInfo TransferInfo) {
 	defer transferMap.Delete(transferInfo.MinioPath)
 
 	ctx := context.Background()
-	remoteObjectInfo, err := Storage{}.GetObjectInfoByHttp(ctx, transferInfo.RemoteUrl, transferInfo.SourceHeaders)
-	if err != nil {
-		slog.Error("GetObjectInfoByHttp", "transfer_info", transferInfo, "err", err)
-		return
-	}
 
 	minioClient := S3Client{}.GetMinioClient(transferInfo.Host)
 	if minioClient == nil {
@@ -67,7 +64,7 @@ func (l Transfer) transfer(transferInfo TransferInfo) {
 		return
 	}
 	uploadID, err := minioClient.NewMultipartUpload(ctx, transferInfo.CacheSetting.StorageCacheMinio.Bucket, transferInfo.MinioPath, minio.PutObjectOptions{
-		ContentType: remoteObjectInfo.ContentType,
+		ContentType: transferInfo.ContentType,
 	})
 	if err != nil {
 		slog.Error("NewMultipartUpload", "transfer_info", transferInfo, "err", err)
@@ -76,7 +73,7 @@ func (l Transfer) transfer(transferInfo TransferInfo) {
 
 	var chunkUploadErr error
 	var completeParts []minio.CompletePart
-	chunks := helper.CalculateChunks(remoteObjectInfo.Size, 5<<20)
+	chunks := helper.CalculateChunks(transferInfo.ResourceSize, 5<<20)
 	for partNumber, item := range chunks {
 		chunkBuffer := bytes.Buffer{}
 
