@@ -96,7 +96,14 @@ func (l Storage) GetObjectInfoByHttp(ctx context.Context, remoteUrl string, head
 		for key, val := range headers {
 			req.Header.Set(key, val[0])
 		}
+		if host := headers.Get("Host"); host != "" {
+			req.Host = host
+			req.Header.Del("Host")
+		}
 	}
+	// Metadata requests must not inherit the client's Range. A chained proxy
+	// may otherwise answer HEAD with 206 and report only the requested part.
+	req.Header.Del("Range")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -140,6 +147,10 @@ func (l Storage) DownloadChunkByHttp() ChunkDownloadFunc {
 			for key, val := range headers {
 				req.Header.Set(key, val[0])
 			}
+			if host := headers.Get("Host"); host != "" {
+				req.Host = host
+				req.Header.Del("Host")
+			}
 		}
 
 		rangeHeader := fmt.Sprintf("bytes=%d-%d", start, end)
@@ -179,14 +190,15 @@ func (l Storage) DownloadChunk(ctx context.Context, chunkDownload ChunkDownloadF
 
 			writer, err := chunkDownload(ctx, path, chunkStart, chunkEnd, headers)
 			if err == nil {
+				_, copyErr := io.Copy(targetWriter, writer)
+				closeErr := writer.Close()
+				if copyErr != nil {
+					return copyErr
+				}
+				if closeErr != nil {
+					return closeErr
+				}
 				success = true
-				_, err = io.Copy(targetWriter, writer)
-				if err != nil {
-					return err
-				}
-				if f, ok := writer.(http.Flusher); ok {
-					f.Flush()
-				}
 				break
 			} else if attempt < DownloadMaxRetry-1 {
 				slog.Info("Download Retrying chunk", "path", path, "start", chunkStart, "end", chunkEnd, "attempt", attempt)

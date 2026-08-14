@@ -148,9 +148,9 @@ func (c File) Download(ctx *gin.Context) {
 	}()
 	if !existsCache {
 		backend = logic.LoadBalance{}.GetBackend(host)
-		remoteUrl = fmt.Sprintf("%s/%s", backend.URL, reqPath)
+		remoteUrl = strings.TrimRight(backend.URL, "/") + "/" + strings.TrimLeft(reqPath, "/")
 		for key, val := range ctx.Request.Header {
-			if key == "If-Modified-Since" || key == "If-None-Match" {
+			if key == "If-Modified-Since" || key == "If-None-Match" || key == "Range" {
 				continue
 			}
 			sourceHeaders.Add(key, val[0])

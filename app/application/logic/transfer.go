@@ -52,7 +52,7 @@ func (l Transfer) Push(transferInfo TransferInfo) {
 }
 
 func (l Transfer) transfer(transferInfo TransferInfo) {
-	slog.Info("transfer begin", "transfer_info", transferInfo)
+	slog.Info("transfer begin", "host", transferInfo.Host, "remote_url", transferInfo.RemoteUrl, "minio_path", transferInfo.MinioPath)
 
 	defer transferMap.Delete(transferInfo.MinioPath)
 
@@ -67,7 +67,7 @@ func (l Transfer) transfer(transferInfo TransferInfo) {
 		ContentType: transferInfo.ContentType,
 	})
 	if err != nil {
-		slog.Error("NewMultipartUpload", "transfer_info", transferInfo, "err", err)
+		slog.Error("NewMultipartUpload", "host", transferInfo.Host, "minio_path", transferInfo.MinioPath, "err", err)
 		return
 	}
 
@@ -79,7 +79,7 @@ func (l Transfer) transfer(transferInfo TransferInfo) {
 
 		chunkUploadErr = Storage{}.DownloadChunk(ctx, Storage{}.DownloadChunkByHttp(), transferInfo.RemoteUrl, item.Start, item.End, transferInfo.SourceHeaders, &chunkBuffer)
 		if chunkUploadErr != nil {
-			slog.Error("DownloadChunkByHttp", "transfer_info", transferInfo, "chunk", item, "err", chunkUploadErr)
+			slog.Error("DownloadChunkByHttp", "host", transferInfo.Host, "remote_url", transferInfo.RemoteUrl, "minio_path", transferInfo.MinioPath, "chunk", item, "err", chunkUploadErr)
 			break
 		}
 
@@ -87,7 +87,7 @@ func (l Transfer) transfer(transferInfo TransferInfo) {
 		part, chunkUploadErr = minioClient.PutObjectPart(ctx, transferInfo.CacheSetting.StorageCacheMinio.Bucket, transferInfo.MinioPath, uploadID, partNumber+1,
 			&chunkBuffer, int64(chunkBuffer.Len()), minio.PutObjectPartOptions{})
 		if chunkUploadErr != nil {
-			slog.Error("PutObjectPart", "transfer_info", transferInfo, "err", chunkUploadErr)
+			slog.Error("PutObjectPart", "host", transferInfo.Host, "minio_path", transferInfo.MinioPath, "err", chunkUploadErr)
 			break
 		}
 		completeParts = append(completeParts, minio.CompletePart{
@@ -103,11 +103,11 @@ func (l Transfer) transfer(transferInfo TransferInfo) {
 
 	_, err = minioClient.CompleteMultipartUpload(ctx, transferInfo.CacheSetting.StorageCacheMinio.Bucket, transferInfo.MinioPath, uploadID, completeParts, minio.PutObjectOptions{})
 	if err != nil {
-		slog.Error("CompleteMultipartUpload", "transfer_info", transferInfo, "err", err)
+		slog.Error("CompleteMultipartUpload", "host", transferInfo.Host, "minio_path", transferInfo.MinioPath, "err", err)
 		return
 	}
 
-	slog.Info("transfer CompleteMultipartUpload", "transfer_info", transferInfo)
+	slog.Info("transfer CompleteMultipartUpload", "host", transferInfo.Host, "minio_path", transferInfo.MinioPath)
 }
 
 func (l Transfer) Loop() {
@@ -117,7 +117,7 @@ func (l Transfer) Loop() {
 			case transferInfo := <-transferChan:
 				err := transferPool.Invoke(transferInfo)
 				if err != nil {
-					slog.Error("transferPool Invoke", "err", err, "transferInfo", transferInfo)
+					slog.Error("transferPool Invoke", "host", transferInfo.Host, "minio_path", transferInfo.MinioPath, "err", err)
 					return
 				}
 			}
