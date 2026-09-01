@@ -190,8 +190,12 @@ func (l Setting) GetStorageCacheSettingByHost(host string) StorageCacheSetting {
 				)
 				cacheSetting.StorageCacheS3 = &globalStorage
 				if globalStorage.Endpoint != "" {
-					if err := (S3Client{}).ResetClient(host, globalStorage); err != nil {
-						slog.Error("GetStorageCacheSettingByHost: ResetS3Client() error", "err", err)
+					// 全局模式下复用已有 client，仅在 client 缺失或存储配置变化时重建。
+					client, clientFingerprint := (S3Client{}).GetS3ClientWithFingerprint(host)
+					if client == nil || clientFingerprint != storageConfigFingerprint(globalStorage) {
+						if err := (S3Client{}).ResetClient(host, globalStorage); err != nil {
+							slog.Error("GetStorageCacheSettingByHost: ResetS3Client() error", "err", err)
+						}
 					}
 				}
 			}
