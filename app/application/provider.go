@@ -34,6 +34,7 @@ func (p Provider) Register(httpServer *httpServer.Server) {
 	p.RegisterHttpRoutes(httpServer)
 
 	logic.Transfer{}.Loop()
+	logic.StartCacheExpirationClearLoop()
 }
 
 func (p Provider) RegisterHttpRoutes(server *httpServer.Server) {

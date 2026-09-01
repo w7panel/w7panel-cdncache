@@ -11,8 +11,10 @@ import (
 
 	"gitee.com/we7coreteam/w7-cdn-cache/app/application/logic"
 	"gitee.com/we7coreteam/w7-cdn-cache/common/helper"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/gin-gonic/gin"
-	"github.com/minio/minio-go/v7"
 	"github.com/we7coreteam/w7-rangine-go/v2/src/http/controller"
 )
 
@@ -38,29 +40,51 @@ func (c File) ClearFileCache(ctx *gin.Context) {
 	}
 
 	setting := logic.Setting{}.GetStorageCacheSettingByHost(params.Host)
-	if setting.StorageSource == nil || setting.StorageSource.Endpoint == "" {
+	if setting.StorageSource == nil || setting.StorageSource.Endpoint == "" || setting.StorageCacheS3 == nil || setting.StorageCacheS3.Bucket == "" {
 		c.JsonResponseWithServerError(ctx, errors.New("附件源配置错误"))
 		return
 	}
-	minioClient := logic.S3Client{}.GetMinioClient(params.Host)
-	if minioClient == nil {
+	s3Client := logic.S3Client{}.GetClient(params.Host)
+	if s3Client == nil {
 		c.JsonResponseWithServerError(ctx, errors.New("附件缓存存储配置错误"))
 		return
 	}
 	params.Path = strings.TrimPrefix(params.Path, "/")
 
-	objectsCh := make(chan minio.ObjectInfo)
-	go func() {
-		defer close(objectsCh)
-		for object := range minioClient.ListObjectsIter(ctx, setting.StorageCacheMinio.Bucket, minio.ListObjectsOptions{Prefix: params.Path, Recursive: true}) {
-			objectsCh <- object
+	paginator := s3.NewListObjectsV2Paginator(s3Client, &s3.ListObjectsV2Input{
+		Bucket: aws.String(setting.StorageCacheS3.Bucket),
+		Prefix: aws.String(params.Path),
+	})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			c.JsonResponseWithServerError(ctx, err)
+			return
 		}
-	}()
-
-	// 删除对象
-	for rErr := range minioClient.RemoveObjects(ctx, setting.StorageCacheMinio.Bucket, objectsCh, minio.RemoveObjectsOptions{}) {
-		if rErr.Err != nil {
-			c.JsonResponseWithServerError(ctx, rErr.Err)
+		objects := make([]types.ObjectIdentifier, 0, len(page.Contents))
+		for _, object := range page.Contents {
+			if object.Key != nil {
+				objects = append(objects, types.ObjectIdentifier{Key: object.Key})
+			}
+		}
+		if len(objects) == 0 {
+			continue
+		}
+		deleteOutput, err := s3Client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+			Bucket: aws.String(setting.StorageCacheS3.Bucket),
+			Delete: &types.Delete{Objects: objects},
+		})
+		if err != nil {
+			c.JsonResponseWithServerError(ctx, err)
+			return
+		}
+		if deleteOutput == nil {
+			c.JsonResponseWithServerError(ctx, errors.New("S3 删除返回空响应"))
+			return
+		}
+		if len(deleteOutput.Errors) > 0 {
+			item := deleteOutput.Errors[0]
+			c.JsonResponseWithServerError(ctx, fmt.Errorf("delete object %q failed: %s: %s", aws.ToString(item.Key), aws.ToString(item.Code), aws.ToString(item.Message)))
 			return
 		}
 	}
@@ -72,12 +96,12 @@ func (c File) Download(ctx *gin.Context) {
 	host := ctx.Request.Host
 	reqPath := ctx.Request.RequestURI
 	setting := logic.Setting{}.GetStorageCacheSettingByHost(host)
-	if setting.StorageSource == nil || setting.StorageSource.Endpoint == "" {
+	if setting.StorageSource == nil || setting.StorageSource.Endpoint == "" || setting.StorageCacheS3 == nil || setting.StorageCacheS3.Bucket == "" {
 		c.JsonResponseWithServerError(ctx, errors.New("附件源配置错误"))
 		return
 	}
-	minioClient := logic.S3Client{}.GetMinioClient(host)
-	if minioClient == nil {
+	s3Client := logic.S3Client{}.GetClient(host)
+	if s3Client == nil {
 		c.JsonResponseWithServerError(ctx, errors.New("附件缓存存储配置错误"))
 		return
 	}
@@ -89,7 +113,7 @@ func (c File) Download(ctx *gin.Context) {
 	cacheRuleLogic := logic.CacheRule{}
 	enableCache := false
 	cacheTtl := int64(-1)
-	minioExistsCache := false
+	s3ExistsCache := false
 	existsCache := false
 	cacheSavePath := ""
 	resourcesSize := int64(0)
@@ -115,28 +139,28 @@ func (c File) Download(ctx *gin.Context) {
 	}
 
 	if enableCache && strings.ToLower(ctx.Request.Method) != setting.PurgeReqMethod {
-		minioObjectInfo, err := logic.Storage{}.GetObjectInfoByMinio(ctx, minioClient, setting.StorageCacheMinio.Bucket, cacheSavePath)
-		slog.Info("StatObject with minio", "path", cacheSavePath, "info", minioObjectInfo, "err", err)
+		s3ObjectInfo, err := logic.Storage{}.GetObjectInfoByS3(ctx, s3Client, setting.StorageCacheS3.Bucket, cacheSavePath)
+		slog.Info("HeadObject with s3", "path", cacheSavePath, "info", s3ObjectInfo, "err", err)
 		if err == nil {
 			existsCache = true
-			minioExistsCache = true
-			if cacheTtl > 0 && time.Since(minioObjectInfo.LastModified).Minutes() > float64(cacheTtl) {
+			s3ExistsCache = true
+			if cacheTtl > 0 && time.Since(s3ObjectInfo.LastModified).Minutes() > float64(cacheTtl) {
 				existsCache = false
 			}
 			if existsCache {
 				modifySince := ctx.Request.Header.Get("If-Modified-Since")
 				if modifySince != "" {
 					clientTime, _ := http.ParseTime(modifySince)
-					if !clientTime.IsZero() && minioObjectInfo.LastModified.Before(clientTime) {
+					if !clientTime.IsZero() && s3ObjectInfo.LastModified.Before(clientTime) {
 						ctx.Status(http.StatusNotModified)
 						return
 					}
 				}
 			}
-			resourcesSize = minioObjectInfo.Size
-			downloadChunkFunc = logic.Storage{}.DownloadChunkByMinio(minioClient, setting.StorageCacheMinio.Bucket)
+			resourcesSize = s3ObjectInfo.Size
+			downloadChunkFunc = logic.Storage{}.DownloadChunkByS3(s3Client, setting.StorageCacheS3.Bucket)
 			downloadPath = cacheSavePath
-			downloadHeader = minioObjectInfo.Header
+			downloadHeader = s3ObjectInfo.Header
 		}
 	}
 	var backend *helper.Backend
@@ -165,7 +189,7 @@ func (c File) Download(ctx *gin.Context) {
 			downloadChunkFunc = logic.Storage{}.DownloadChunkByHttp()
 			downloadPath = remoteUrl
 			downloadHeader = httpObjectInfo.Header
-		} else if minioExistsCache {
+		} else if s3ExistsCache {
 			existsCache = true
 			backend = nil
 		} else {
@@ -205,7 +229,8 @@ func (c File) Download(ctx *gin.Context) {
 		go logic.Transfer{}.Push(logic.TransferInfo{
 			Host:          host,
 			RemoteUrl:     remoteUrl,
-			MinioPath:     cacheSavePath,
+			S3Path:        cacheSavePath,
+			CacheTTL:      cacheTtl,
 			ResourceSize:  resourcesSize,
 			ContentType:   downloadHeader.Get("Content-Type"),
 			CacheSetting:  setting,

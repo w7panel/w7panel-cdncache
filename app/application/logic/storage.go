@@ -15,7 +15,8 @@ import (
 	"time"
 
 	"gitee.com/we7coreteam/w7-cdn-cache/common/helper"
-	"github.com/minio/minio-go/v7"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 const (
@@ -39,46 +40,66 @@ type Storage struct {
 	logic
 }
 
-func (l Storage) GetObjectInfoByMinio(ctx context.Context, client *minio.Core, bucket string, path string) (*ObjectInfo, error) {
-	object, err := client.StatObject(ctx, bucket, path, minio.StatObjectOptions{})
-	if err == nil {
-		headers := make(http.Header)
-		// 基础内容信息
-		headers.Set("Content-Length", fmt.Sprintf("%d", object.Size))
-		headers.Set("Content-Type", object.ContentType)
-		// 缓存相关头
-		headers.Set("ETag", object.ETag)
-		headers.Set("Last-Modified", object.LastModified.Format(time.RFC1123))
-		if !object.Expires.IsZero() {
-			headers.Set("Expires", object.Expires.Format(time.RFC1123))
-		}
-
-		return &ObjectInfo{
-			Name:         filepath.Base(object.Key),
-			Key:          object.Key,
-			LastModified: object.LastModified,
-			ContentType:  object.ContentType,
-			Size:         object.Size,
-			Header:       headers,
-		}, nil
+func (l Storage) GetObjectInfoByS3(ctx context.Context, client *s3.Client, bucket string, objectPath string) (*ObjectInfo, error) {
+	object, err := client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(objectPath),
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	return nil, err
+	contentLength := int64(0)
+	if object.ContentLength != nil {
+		contentLength = *object.ContentLength
+	}
+	contentType := ""
+	if object.ContentType != nil {
+		contentType = *object.ContentType
+	}
+	lastModified := time.Time{}
+	if object.LastModified != nil {
+		lastModified = *object.LastModified
+	}
+	headers := make(http.Header)
+	headers.Set("Content-Length", fmt.Sprintf("%d", contentLength))
+	if contentType != "" {
+		headers.Set("Content-Type", contentType)
+	}
+	if object.ETag != nil {
+		headers.Set("ETag", *object.ETag)
+	}
+	if !lastModified.IsZero() {
+		headers.Set("Last-Modified", lastModified.Format(time.RFC1123))
+	}
+	if object.Expires != nil {
+		headers.Set("Expires", object.Expires.Format(time.RFC1123))
+	}
+
+	return &ObjectInfo{
+		Name:         filepath.Base(objectPath),
+		Key:          objectPath,
+		LastModified: lastModified,
+		ContentType:  contentType,
+		Size:         contentLength,
+		Header:       headers,
+	}, nil
 }
 
-func (l Storage) DownloadChunkByMinio(client *minio.Core, bucket string) ChunkDownloadFunc {
+func (l Storage) DownloadChunkByS3(client *s3.Client, bucket string) ChunkDownloadFunc {
 	return func(ctx context.Context, path string, start, end int64, headers http.Header) (io.ReadCloser, error) {
-		opts := minio.GetObjectOptions{}
-		err := opts.SetRange(start, end)
-		if err != nil {
-			return nil, fmt.Errorf("set range failed: %w", err)
-		}
-
-		obj, _, _, err := client.GetObject(ctx, bucket, path, opts)
+		obj, err := client.GetObject(ctx, &s3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(path),
+			Range:  aws.String(fmt.Sprintf("bytes=%d-%d", start, end)),
+		})
 		if err != nil {
 			return nil, fmt.Errorf("get object failed: %w", err)
 		}
-		return obj, nil
+		if obj == nil || obj.Body == nil {
+			return nil, errors.New("get object returned an empty body")
+		}
+		return obj.Body, nil
 	}
 }
 

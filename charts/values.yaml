@@ -88,3 +88,4 @@ cluster:
 
 
 OAUTH_TOKEN: test
+CACHE_CLEANUP_ENABLED: true

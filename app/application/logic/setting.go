@@ -2,7 +2,9 @@ package logic
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,7 +20,7 @@ const DefaultPathPrefix = "/"
 
 const globalSettingGroup = "global"
 
-type StorageMinio struct {
+type StorageS3 struct {
 	AccessKey string `json:"access_key"`
 	SecretKey string `json:"secret_key"`
 	Bucket    string `json:"bucket"`
@@ -34,7 +36,7 @@ type StorageSource struct {
 
 type StorageCacheSetting struct {
 	StorageSource     *StorageSource         `json:"storage_source"`
-	StorageCacheMinio *StorageMinio          `json:"minio"`
+	StorageCacheS3    *StorageS3             `json:"minio"`
 	PathCacheRules    []PathCacheRule        `json:"path_cache_rules"`
 	PathKeyCacheRules []PathKeyCacheRule     `json:"path_key_cache_rules"`
 	PurgeReqMethod    string                 `json:"purge_req_method"`
@@ -48,15 +50,43 @@ type Setting struct {
 	logic
 }
 
+// normalizeS3Endpoint validates and canonicalizes an endpoint before it is
+// persisted. Bare host:port values retain the legacy HTTP behavior; HTTPS must
+// be specified explicitly.
+func normalizeS3Endpoint(endpoint string) (string, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return "", fmt.Errorf("s3 endpoint is required")
+	}
+	if !strings.Contains(endpoint, "://") {
+		endpoint = "http://" + endpoint
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("invalid s3 endpoint: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" || parsed.Host == "" {
+		return "", fmt.Errorf("invalid s3 endpoint %q", endpoint)
+	}
+	return strings.TrimRight(endpoint, "/"), nil
+}
+
 func (l Setting) SetStorageCacheSetting(host string, cacheSetting StorageCacheSetting) error {
+	if cacheSetting.StorageCacheS3 != nil && cacheSetting.StorageCacheS3.Endpoint != "" {
+		normalizedEndpoint, err := normalizeS3Endpoint(cacheSetting.StorageCacheS3.Endpoint)
+		if err != nil {
+			return fmt.Errorf("invalid S3 endpoint: %w", err)
+		}
+		cacheSetting.StorageCacheS3.Endpoint = normalizedEndpoint
+	}
 	cacheSettingMap := l.GetStorageCacheSettingMap(host)
 	if host != globalSettingGroup && storageConfigMode(cacheSetting.Extra) == "global" {
 		// 全局模式继承连接配置，但允许站点使用独立的 bucket。
 		bucket := ""
-		if cacheSetting.StorageCacheMinio != nil {
-			bucket = cacheSetting.StorageCacheMinio.Bucket
+		if cacheSetting.StorageCacheS3 != nil {
+			bucket = cacheSetting.StorageCacheS3.Bucket
 		}
-		cacheSetting.StorageCacheMinio = &StorageMinio{Bucket: bucket}
+		cacheSetting.StorageCacheS3 = &StorageS3{Bucket: bucket}
 	}
 
 	if cacheSetting.PathCacheRules != nil {
@@ -71,9 +101,10 @@ func (l Setting) SetStorageCacheSetting(host string, cacheSetting StorageCacheSe
 	}
 	cacheSetting.PurgeReqMethod = strings.ToLower(cacheSetting.PurgeReqMethod)
 
-	cacheSettingMap[DefaultPathPrefix] = cacheSetting
+	nextCacheSettingMap := cloneStorageSettingMap(cacheSettingMap)
+	nextCacheSettingMap.Store(DefaultPathPrefix, cacheSetting)
 
-	settingContent, err := json.Marshal(cacheSettingMap)
+	settingContent, err := json.Marshal(storageSettingMapSnapshot(nextCacheSettingMap))
 	if err != nil {
 		return err
 	}
@@ -86,76 +117,81 @@ func (l Setting) SetStorageCacheSetting(host string, cacheSetting StorageCacheSe
 		return err
 	}
 
-	if cacheSetting.StorageCacheMinio != nil && cacheSetting.StorageCacheMinio.Endpoint != "" {
-		err := S3Client{}.ResetMinioClient(host, *cacheSetting.StorageCacheMinio)
+	if cacheSetting.StorageCacheS3 != nil && cacheSetting.StorageCacheS3.Endpoint != "" {
+		err := S3Client{}.ResetClient(host, *cacheSetting.StorageCacheS3)
 		if err != nil {
 			return err
 		}
 	}
 
+	// 配置保存成功后使内存缓存失效，下一次读取时从文件重新加载并补齐派生字段（如 Endpoints）。
 	defaultStorageSettingMap.Delete(host)
 	LoadBalance{}.Reset(host)
 
 	return nil
 }
 
-func (l Setting) GetStorageCacheSettingMap(host string) map[string]StorageCacheSetting {
-	cacheSettingMap := make(map[string]StorageCacheSetting)
+func (l Setting) GetStorageCacheSettingMap(host string) *sync.Map {
 	val, exists := defaultStorageSettingMap.Load(host)
 	if !exists {
+		cacheSettingMap := make(map[string]StorageCacheSetting)
 		settingSaveDir := filepath.Dir(facade.GetConfig().GetString("database.default.db_name"))
 		settingSavePath := filepath.Join(settingSaveDir, host+settingFileSuffix)
 		if _, err := os.Stat(settingSavePath); os.IsNotExist(err) {
-			return cacheSettingMap
+			return storageSettingMapFromMap(cacheSettingMap)
 		}
 
 		content, err := os.ReadFile(settingSavePath)
 		if err != nil {
 			slog.Error("GetStorageCacheSetting: os.ReadFile(settingSavePath) error", "err", err)
-			return cacheSettingMap
+			return storageSettingMapFromMap(cacheSettingMap)
 		}
 		err = json.Unmarshal(content, &cacheSettingMap)
 		if err != nil {
 			slog.Error("GetStorageCacheSetting: json.Unmarshal() error", "err", err)
-			return cacheSettingMap
+			return storageSettingMapFromMap(cacheSettingMap)
 		}
 
 		for key, item := range cacheSettingMap {
 			if item.StorageSource != nil {
 				item.StorageSource.Endpoints = strings.Split(item.StorageSource.Endpoint, ",")
 			}
-			if item.StorageCacheMinio != nil && item.StorageCacheMinio.Endpoint != "" {
-				err = S3Client{}.ResetMinioClient(host, *item.StorageCacheMinio)
+			if item.StorageCacheS3 != nil && item.StorageCacheS3.Endpoint != "" {
+				err = S3Client{}.ResetClient(host, *item.StorageCacheS3)
 				if err != nil {
-					slog.Error("GetStorageCacheSetting: ResetStorageMinioClient() error", "err", err)
+					slog.Error("GetStorageCacheSetting: ResetS3Client() error", "err", err)
 				}
 			}
 
 			cacheSettingMap[key] = item
 		}
 
-		defaultStorageSettingMap.Store(host, cacheSettingMap)
-	} else {
-		cacheSettingMap = val.(map[string]StorageCacheSetting)
+		loadedCacheSettingMap := storageSettingMapFromMap(cacheSettingMap)
+		actual, _ := defaultStorageSettingMap.LoadOrStore(host, loadedCacheSettingMap)
+		return actual.(*sync.Map)
 	}
 
-	return cacheSettingMap
+	return val.(*sync.Map)
 }
 
 func (l Setting) GetStorageCacheSettingByHost(host string) StorageCacheSetting {
 	cacheSettingMap := l.GetStorageCacheSettingMap(host)
-	if cacheSetting, ok := cacheSettingMap[DefaultPathPrefix]; ok {
+	if value, ok := cacheSettingMap.Load(DefaultPathPrefix); ok {
+		cacheSetting, ok := value.(StorageCacheSetting)
+		if !ok {
+			return StorageCacheSetting{}
+		}
 		if host != globalSettingGroup && storageConfigMode(cacheSetting.Extra) == "global" {
 			globalSetting := l.GetStorageCacheSettingByHost(globalSettingGroup)
-			if globalSetting.StorageCacheMinio != nil {
+			if globalSetting.StorageCacheS3 != nil {
 				globalStorage := resolveGlobalStorage(
-					*globalSetting.StorageCacheMinio,
-					cacheSetting.StorageCacheMinio,
+					*globalSetting.StorageCacheS3,
+					cacheSetting.StorageCacheS3,
 				)
-				cacheSetting.StorageCacheMinio = &globalStorage
+				cacheSetting.StorageCacheS3 = &globalStorage
 				if globalStorage.Endpoint != "" {
-					if err := (S3Client{}).ResetMinioClient(host, globalStorage); err != nil {
-						slog.Error("GetStorageCacheSettingByHost: ResetMinioClient() error", "err", err)
+					if err := (S3Client{}).ResetClient(host, globalStorage); err != nil {
+						slog.Error("GetStorageCacheSettingByHost: ResetS3Client() error", "err", err)
 					}
 				}
 			}
@@ -165,7 +201,38 @@ func (l Setting) GetStorageCacheSettingByHost(host string) StorageCacheSetting {
 	return StorageCacheSetting{}
 }
 
-func resolveGlobalStorage(globalStorage StorageMinio, siteStorage *StorageMinio) StorageMinio {
+func storageSettingMapFromMap(settings map[string]StorageCacheSetting) *sync.Map {
+	result := &sync.Map{}
+	for key, setting := range settings {
+		result.Store(key, setting)
+	}
+	return result
+}
+
+func storageSettingMapSnapshot(settings *sync.Map) map[string]StorageCacheSetting {
+	result := make(map[string]StorageCacheSetting)
+	if settings == nil {
+		return result
+	}
+	settings.Range(func(key, value interface{}) bool {
+		keyString, ok := key.(string)
+		if !ok {
+			return true
+		}
+		setting, ok := value.(StorageCacheSetting)
+		if ok {
+			result[keyString] = setting
+		}
+		return true
+	})
+	return result
+}
+
+func cloneStorageSettingMap(settings *sync.Map) *sync.Map {
+	return storageSettingMapFromMap(storageSettingMapSnapshot(settings))
+}
+
+func resolveGlobalStorage(globalStorage StorageS3, siteStorage *StorageS3) StorageS3 {
 	if siteStorage != nil && siteStorage.Bucket != "" {
 		globalStorage.Bucket = siteStorage.Bucket
 	}

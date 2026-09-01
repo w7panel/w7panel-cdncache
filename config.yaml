@@ -29,3 +29,7 @@ database:
     logger: db
 setting:
   oauth_token: ${OAUTH_TOKEN-rogtdpxguk}
+cache:
+  cleanup:
+    enabled: ${CACHE_CLEANUP_ENABLED-true}
+    queue_dir: ${CACHE_CLEANUP_QUEUE_DIR-}

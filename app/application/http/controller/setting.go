@@ -42,7 +42,7 @@ func (c Setting) Set(ctx *gin.Context) {
 	type ParamsValidate struct {
 		Host             string                   `json:"group" binding:"required"`
 		StorageSource    logic.StorageSource      `json:"storage_source"`
-		Minio            logic.StorageMinio       `json:"minio"`
+		S3               logic.StorageS3          `json:"minio"`
 		PathCacheRule    []logic.PathCacheRule    `json:"path_cache_rules"`
 		PathKeyCacheRule []logic.PathKeyCacheRule `json:"path_key_cache_rules"`
 		Extra            map[string]interface{}   `json:"extra"`
@@ -57,7 +57,7 @@ func (c Setting) Set(ctx *gin.Context) {
 	for i, item := range host {
 		err := logic.Setting{}.SetStorageCacheSetting(item, logic.StorageCacheSetting{
 			StorageSource:     &params.StorageSource,
-			StorageCacheMinio: &params.Minio,
+			StorageCacheS3:    &params.S3,
 			PathCacheRules:    params.PathCacheRule,
 			PathKeyCacheRules: params.PathKeyCacheRule,
 			Extra:             params.Extra,

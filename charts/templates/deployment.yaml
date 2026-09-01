@@ -42,6 +42,10 @@ spec:
               value: {{ .Values.OAUTH_TOKEN }}
             - name: SQLITE_DIR
               value: /home/cdn-cache/db/
+            - name: CACHE_CLEANUP_ENABLED
+              value: {{ .Values.CACHE_CLEANUP_ENABLED | quote }}
+            - name: CACHE_CLEANUP_QUEUE_DIR
+              value: /home/cdn-cache/db/
           volumeMounts:
             - mountPath: /home/cdn-cache/db
               name: sqlite-storage
