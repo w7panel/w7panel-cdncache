@@ -49,8 +49,6 @@ func (c File) ClearFileCache(ctx *gin.Context) {
 		c.JsonResponseWithServerError(ctx, errors.New("附件缓存存储配置错误"))
 		return
 	}
-	params.Path = strings.TrimPrefix(params.Path, "/")
-
 	paginator := s3.NewListObjectsV2Paginator(s3Client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(setting.StorageCacheS3.Bucket),
 		Prefix: aws.String(params.Path),
