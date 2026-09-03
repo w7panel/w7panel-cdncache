@@ -160,6 +160,13 @@ func (q *CacheExpirationQueue) EnqueueMany(tasks []CacheExpirationTask) error {
 	}
 
 	if err := q.store.SaveTasks(tasks); err != nil {
+		slog.Error("enqueue cache expiration tasks failed",
+			"count", len(tasks),
+			"host", tasks[0].Host,
+			"bucket", tasks[0].Bucket,
+			"paths", cacheExpirationTaskPaths(tasks),
+			"err", err,
+		)
 		return err
 	}
 
@@ -168,6 +175,13 @@ func (q *CacheExpirationQueue) EnqueueMany(tasks []CacheExpirationTask) error {
 		q.pushHeapItemLocked(task)
 	}
 	q.mu.Unlock()
+	slog.Info("cache expiration tasks enqueued",
+		"count", len(tasks),
+		"host", tasks[0].Host,
+		"bucket", tasks[0].Bucket,
+		"paths", cacheExpirationTaskPaths(tasks),
+		"expire_at", tasks[0].ExpireAt,
+	)
 
 	select {
 	case q.wake <- struct{}{}:
@@ -230,7 +244,13 @@ func (q *CacheExpirationQueue) dispatchTasks(ctx context.Context, tasks []CacheE
 	}
 	for _, group := range groups {
 		if err := q.pool.Invoke(cacheExpirationWork{ctx: ctx, tasks: group}); err != nil {
-			slog.Error("dispatch cache expiration tasks", "err", err)
+			slog.Error("dispatch cache expiration tasks",
+				"host", group[0].Host,
+				"bucket", group[0].Bucket,
+				"count", len(group),
+				"paths", cacheExpirationTaskPaths(group),
+				"err", err,
+			)
 		}
 	}
 }
@@ -294,16 +314,32 @@ func (q *CacheExpirationQueue) processTaskGroup(ctx context.Context, tasks []Cac
 	if len(tasks) == 0 {
 		return
 	}
+	slog.Info("cache expiration deletion started",
+		"host", tasks[0].Host,
+		"bucket", tasks[0].Bucket,
+		"count", len(tasks),
+		"paths", cacheExpirationTaskPaths(tasks),
+	)
 
 	setting := (Setting{}).GetStorageCacheSettingByHost(tasks[0].Host)
 	if setting.StorageCacheS3 == nil || setting.StorageCacheS3.Endpoint == "" {
-		slog.Error("cache expiration storage configuration is not available", "host", tasks[0].Host)
+		slog.Error("cache expiration storage configuration is not available",
+			"host", tasks[0].Host,
+			"bucket", tasks[0].Bucket,
+			"count", len(tasks),
+			"paths", cacheExpirationTaskPaths(tasks),
+		)
 		return
 	}
 
 	client, clientFingerprint := (S3Client{}).GetS3ClientWithFingerprint(tasks[0].Host)
 	if client == nil {
-		slog.Error("cache expiration s3 client is not configured", "host", tasks[0].Host)
+		slog.Error("cache expiration s3 client is not configured",
+			"host", tasks[0].Host,
+			"bucket", tasks[0].Bucket,
+			"count", len(tasks),
+			"paths", cacheExpirationTaskPaths(tasks),
+		)
 		return
 	}
 
@@ -338,6 +374,7 @@ func (q *CacheExpirationQueue) processTaskGroup(ctx context.Context, tasks []Cac
 	// without this deadline a stalled endpoint could occupy a worker forever.
 	requestCtx, cancel := context.WithTimeout(ctx, cacheExpirationRequestTimeout)
 	defer cancel()
+	deleteStartedAt := time.Now()
 	removeOutput, err := client.DeleteObjects(requestCtx, &s3.DeleteObjectsInput{
 		Bucket: aws.String(deletable[0].Bucket),
 		Delete: &types.Delete{Objects: objects},
@@ -359,6 +396,22 @@ func (q *CacheExpirationQueue) processTaskGroup(ctx context.Context, tasks []Cac
 			}
 		}
 	}
+	deleteAttrs := []any{
+		"host", tasks[0].Host,
+		"bucket", deletable[0].Bucket,
+		"count", len(deletable),
+		"paths", cacheExpirationTaskPaths(deletable),
+		"failed", len(removeErrors),
+		"duration", time.Since(deleteStartedAt),
+	}
+	if err != nil {
+		deleteAttrs = append(deleteAttrs, "err", err)
+		slog.Error("cache expiration deletion failed", deleteAttrs...)
+	} else if len(removeErrors) > 0 {
+		slog.Warn("cache expiration deletion completed with errors", deleteAttrs...)
+	} else {
+		slog.Info("cache expiration deletion completed", deleteAttrs...)
+	}
 	for _, task := range deletable {
 		if err, ok := removeErrors[task.Key]; ok {
 			// Keep every failed item in the store. We intentionally do not classify
@@ -377,8 +430,29 @@ func (q *CacheExpirationQueue) deleteTasks(tasks []CacheExpirationTask) {
 		return
 	}
 	if err := q.store.DeleteTasks(tasks); err != nil {
-		slog.Error("persist cache expiration completion", "tasks", len(tasks), "err", err)
+		slog.Error("persist cache expiration completion",
+			"count", len(tasks),
+			"host", tasks[0].Host,
+			"bucket", tasks[0].Bucket,
+			"paths", cacheExpirationTaskPaths(tasks),
+			"err", err,
+		)
+		return
 	}
+	slog.Info("cache expiration task completion queued",
+		"count", len(tasks),
+		"host", tasks[0].Host,
+		"bucket", tasks[0].Bucket,
+		"paths", cacheExpirationTaskPaths(tasks),
+	)
+}
+
+func cacheExpirationTaskPaths(tasks []CacheExpirationTask) []string {
+	paths := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		paths = append(paths, task.Key)
+	}
+	return paths
 }
 
 // Close stops accepting cleanup work and closes the durable store. The caller

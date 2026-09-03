@@ -137,13 +137,24 @@ func (s *CacheExpirationStore) flushPending(pending []cacheExpirationEvent) []ca
 	if len(pending) == 0 {
 		return nil
 	}
+	putCount, deleteCount := cacheExpirationEventCounts(pending)
 	if err := s.writeEvents(pending); err != nil {
 		s.writerErr = err
-		slog.Error("write cache expiration bbolt batch", "count", len(pending), "err", err)
+		slog.Error("write cache expiration bbolt batch",
+			"count", len(pending),
+			"put", putCount,
+			"delete", deleteCount,
+			"err", err,
+		)
 		return pending
 	}
 	s.dirty = true
 	s.writerErr = nil
+	slog.Info("write cache expiration bbolt batch",
+		"count", len(pending),
+		"put", putCount,
+		"delete", deleteCount,
+	)
 	return nil
 }
 
@@ -191,6 +202,7 @@ func (s *CacheExpirationStore) syncDB() error {
 	}
 	s.dirty = false
 	s.writerErr = nil
+	slog.Info("sync cache expiration bbolt database")
 	return nil
 }
 
@@ -263,6 +275,7 @@ func (s *CacheExpirationStore) TasksSnapshot() ([]CacheExpirationTask, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load cache expiration tasks: %w", err)
 	}
+	slog.Info("load cache expiration tasks from bbolt", "count", len(tasks))
 	return tasks, nil
 }
 
@@ -295,5 +308,22 @@ func (s *CacheExpirationStore) Close() error {
 			s.closeErr = s.writerErr
 		}
 	})
+	if s.closeErr != nil {
+		slog.Error("close cache expiration bbolt store", "err", s.closeErr)
+	} else {
+		slog.Info("close cache expiration bbolt store")
+	}
 	return s.closeErr
+}
+
+func cacheExpirationEventCounts(events []cacheExpirationEvent) (putCount, deleteCount int) {
+	for _, event := range events {
+		switch event.operation {
+		case "put":
+			putCount++
+		case "delete":
+			deleteCount++
+		}
+	}
+	return putCount, deleteCount
 }
