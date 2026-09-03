@@ -11,6 +11,7 @@ import (
 	"time"
 
 	bolt "go.etcd.io/bbolt"
+	errors2 "go.etcd.io/bbolt/errors"
 )
 
 const (
@@ -19,6 +20,12 @@ const (
 	cacheExpirationWriteBatchSize = 1_000
 	cacheExpirationWriteQueueSize = 256
 	cacheExpirationSyncInterval   = 5 * time.Second
+	// bbolt takes an exclusive lock on the database file. A short overlap with
+	// an old process should be handled inside the persistence layer so callers
+	// only see an error after all lock-acquisition attempts are exhausted.
+	cacheExpirationStoreOpenTimeout  = 5 * time.Second
+	cacheExpirationStoreOpenAttempts = 5
+	cacheExpirationStoreOpenRetry    = time.Second
 )
 
 var errCacheExpirationStoreClosed = errors.New("cache expiration store is closed")
@@ -64,10 +71,7 @@ func NewCacheExpirationStore(storeDir string) (*CacheExpirationStore, error) {
 	}
 
 	dbPath := filepath.Join(storeDir, cacheExpirationDBName)
-	db, err := bolt.Open(dbPath, 0600, &bolt.Options{
-		Timeout: time.Second,
-		NoSync:  true, // writer syncs periodically instead of on every batch
-	})
+	db, err := openCacheExpirationDB(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open cache expiration bbolt database: %w", err)
 	}
@@ -86,6 +90,35 @@ func NewCacheExpirationStore(storeDir string) (*CacheExpirationStore, error) {
 	}
 	go store.writeLoop()
 	return store, nil
+}
+
+func openCacheExpirationDB(dbPath string) (*bolt.DB, error) {
+	var (
+		db  *bolt.DB
+		err error
+	)
+	for attempt := 1; attempt <= cacheExpirationStoreOpenAttempts; attempt++ {
+		db, err = bolt.Open(dbPath, 0600, &bolt.Options{
+			Timeout: cacheExpirationStoreOpenTimeout,
+			NoSync:  true, // writer syncs periodically instead of on every batch
+		})
+		if err == nil {
+			return db, nil
+		}
+		if !errors.Is(err, errors2.ErrTimeout) || attempt == cacheExpirationStoreOpenAttempts {
+			break
+		}
+
+		slog.Warn("open cache expiration bbolt database failed; retrying",
+			"path", dbPath,
+			"attempt", attempt,
+			"max_attempts", cacheExpirationStoreOpenAttempts,
+			"retry_in", cacheExpirationStoreOpenRetry,
+			"err", err,
+		)
+		time.Sleep(cacheExpirationStoreOpenRetry)
+	}
+	return nil, err
 }
 
 // writeLoop collects mutations and commits them in one bbolt transaction.

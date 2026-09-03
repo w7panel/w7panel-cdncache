@@ -16,7 +16,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/panjf2000/ants/v2"
 	"github.com/we7coreteam/w7-rangine-go/v2/pkg/support/facade"
-	"go.uber.org/zap"
 )
 
 const (
@@ -66,7 +65,7 @@ func StartCacheExpirationClearLoop() {
 	go func() {
 		err := StartCacheExpirationWorker()
 		if err != nil {
-			slog.Error("start cache expiration worker failed", zap.Error(err))
+			slog.Error("start cache expiration worker failed", "err", err)
 			return
 		}
 	}()
